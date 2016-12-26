@@ -3,91 +3,169 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX 10
+#define MAX 10 // init database to this size at first
 
 //pthread_mutex_t lock; // our global mutex
-typdedef struct myListsDatabase{
+/*typdedef struct myListsDatabase{
 	struct node * head; // doubly linked list
 	pthread_mutex_t lock; // mutex for "head" list
-}myListsDatabase;
+}myListsDatabase;*/
 
-myListsDatabase databaseList [MAX]; // global var
+// Notes:
+// 1. Free memory when needed + errors
+// 2. Make sure I used locks for the minimum time + minimum lock/unlock operations
 
-struct node {
+// data structure including list and mutex
+struct intlist {
 	int value; // assume positive integer
-	node * prev; // pointer to previous node
-	node * next; // pointer to next node;
+	intlist * prev; // pointer to previous node
+	intlist * next; // pointer to next node;
 	int size; // number of elements in list
+	pthread_mutex_t lock;
+	pthread_cond_t notEmpty;
 };
 
-// headers:
-void intlist_init(node * head);
-void intlist_destroy(node * head);
-void intlist_push_head(node * head, int val);
-int intlist_pop_tail(node * head);
-void intlist_remove_last_k(node * head, int k);
-int intlist_size(node * head);
-pthread_mutex_t * intlist_get_mutex(node * head);
+intlist * databaseList = NULL; // global var
+int numOfLists = 0; // global var
+int databaseSize = MAX; // global var
 
-void intlist_init(node * head){
+// headers:
+void intlist_init(intlist * list);
+void intlist_destroy(intlist * list);
+void intlist_push_head(intlist * list, int val);
+int intlist_pop_tail(intlist * list);
+void intlist_remove_last_k(intlist * list, int k);
+int intlist_size(intlist * list);
+pthread_mutex_t * intlist_get_mutex(intlist * list);
+
+
+void intlist_init(intlist * list){
 	//TODO check ptr?
-	//what is the argument?
 	int returnVal; // return value from creating the mutex
-	struct node * newNode = (struct node *) malloc(sizeof(struct node));
-	if (newNode == NULL){
+	int foundOpenSpot = 0; // flag for finding a new opening in database
+	int i; // iteration index
+
+	// create a new list
+	struct intlist * list = (struct intlist *) malloc(sizeof(struct intlist));
+	if (list == NULL){
 		printf("Error allocation memory for new node: %s\n", strerror(errno));
 		exit(errno);
 	}
-	newNode->size = 0;
-	newNode->prev = NULL;
-	newNode->next = NULL;
 
-	// create a new object including list and mutex
-	myListsDatabase data = (myListsDatabase) malloc(sizeof(myListsDatabase));
-	if (data ==NULL){
-		printf("Error allocation memory for new data struct: %s\n", strerror(errno));
-		exit(errno);
-	}
+	// init fields
+	list->size = 0;
+	list->prev = NULL;
+	list->next = NULL;
 
 	// create new mutex for current list and check for errors
-	returnVal = pthread_mutex_init(&(data->lock), NULL);
-	if (returnVal) {
+	returnVal = pthread_mutex_init(&(list->lock), NULL);
+	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_init(): %s\n", strerror(rc));
-		exit(-1); //TODO chanfe to errno?
+		free(list);
+		exit(-1); //TODO change to errno?
 	}
 
-	data->head = newNode;
+	// create new conditional variable for current list and check for errors
+	returnVal = pthread_cond_init(&(list->notEmpty), NULL);
+	if (returnVal != 0) {
+		printf("ERROR in pthread_cond_init(): %s\n", strerror(rc));
+		free(list);
+		//TODO destroy more
+		exit(-1); //TODO change to errno?
+	}
 
-	// allocate the bug database list
 
+	// allocate new list of doublylinked list if not created yet
+	if (databaseList == NULL){
+		intlist * databaseList = (intlist *) malloc(sizeof(intlist)*databaseSize);
+		if (databaseList == NULL){
+			printf("Error allocation memory for new data struct: %s\n", strerror(errno));
+			free(list);
+			pthread_mutex_destroy(&lock);
+			//TODO add destroy to cond too - whenever error occur
+			exit(errno);
+		}
+	}
+	
+	// now we can assume a database is already allocate.
+	// add the new doubly linked list (called "list") to the databaseList
+	// means - find an opening in databaseList. 
+	// If none is avaliable - double the size of databaseList and then add the new "list"
 
+	numOfLists++; // update counter of all lists
+
+	for (i=0; i<numOfLists; i++){
+		if (databaseList[i] == NULL){ // found an open spot
+			databaseList[i] = list; // add to database
+			foundOpenSpot = 1; // mark that an open spot was found
+			break; // no need for further search
+		}
+	}
+
+	// if no open spot was found -- database is full -- double database size
+	if (!foundOpenSpot){ 
+		databaseSize = databaseSize * 2;
+		intlist * databaseList = (intlist *) realloc(databaseList, sizeof(intlist)*databaseSize);
+		if (databaseList == NULL){
+			printf("Error allocation memory for new data struct: %s\n", strerror(errno));
+			free(list);
+			pthread_mutex_destroy(&lock);
+			//TODO free database and lists in it
+			exit(errno);
+		}
+	}
+
+	// move new list to an open spot
+	databaseList[ (databaseSize / 2) + 1 ] = list;
 
 }
 
 
 
-void intlist_destroy(node * head){
-
-}
-
-void intlist_push_head(node * head, int val){
-	if (head == NULL)
+void intlist_push_head(intlist * list, int val){
+	if (list == NULL)
 		return;
 
-	node * oldHead = head; // save old head
-	struct node * newNode = (struct node *) malloc(sizeof(struct node));
+	intlist * oldHead = list; // save old head
+	struct intlist * newNode = (struct intlist *) malloc(sizeof(struct intlist));
 	if (newNode == NULL){
 		printf("Error allocation memory for new node: %s\n", strerror(errno));
+		//TODO free more - maybe destroy?
 		exit(errno);
 	}
-	newNode->prev =NULL; // this is the head now
-	newNode->next = oldHead;
-	oldHead->prev = newNode;
-	newNode->value = val;
-	newNode->size = oldHead->size + 1;
+	newNode->prev = NULL; // this is the head now
+
+	pthread_mutex_lock(&(list->lock)); // lock
+
+	newNode->next = oldHead; // points to old head
+	oldHead->prev = newNode; // points to new node
+	newNode->value = val; // update value
+	newNode->size = oldHead->size + 1; // update size
+	newNode->lock = oldHead->lock; // both nodes share the same mutex
+
+	list = newNode; // list suppose to point to the new head
+
+	pthread_cond_signal(&(list->notEmpty)); // signal that list is not empty
+	pthread_mutex_unlock(&(list->lock)); // unlock
 }
 
+pthread_mutex_t * intlist_get_mutex(intlist * list){
+	if (list == NULL){
+		printf("Lock not found - list is NULL!\n");
+		return NULL;
+		//TODO need to exit program??
+	}
 
+	return &(list->lock); // check if its true at all....
+}
 
+int intlist_size(intlist * list){
+	if (list == NULL){
+		printf("Size not found - list is NULL!\n");
+		return NULL;
+		//TODO need to exit program??
+	}
 
+	return (list->size); 
+}
 
