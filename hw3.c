@@ -25,9 +25,9 @@ struct intlist {
 	pthread_cond_t notEmpty;
 };
 
-intlist * databaseList = NULL; // global var
-int numOfLists = 0; // global var
-int databaseSize = MAX; // global var
+intlist * databaseList = NULL; // global var - list of ALL doubly linked-lists
+int numOfLists = 0; // global var - sum of ALL existing doubly linked-lists
+int databaseSize = MAX; // global var - number of the size of databaseList
 
 // headers:
 void intlist_init(intlist * list);
@@ -62,27 +62,28 @@ void intlist_init(intlist * list){
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_init(): %s\n", strerror(rc));
 		free(list);
-		exit(-1); //TODO change to errno?
+		exit(errno); 
 	}
 
 	// create new conditional variable for current list and check for errors
 	returnVal = pthread_cond_init(&(list->notEmpty), NULL);
 	if (returnVal != 0) {
 		printf("ERROR in pthread_cond_init(): %s\n", strerror(rc));
+		pthread_mutex_destroy(&(list->lock));
 		free(list);
 		//TODO destroy more
-		exit(-1); //TODO change to errno?
+		exit(errno); 
 	}
 
 
 	// allocate new list of doublylinked list if not created yet
 	if (databaseList == NULL){
-		intlist * databaseList = (intlist *) malloc(sizeof(intlist)*databaseSize);
+		databaseList = (intlist *) malloc(sizeof(intlist)*databaseSize);
 		if (databaseList == NULL){
 			printf("Error allocation memory for new data struct: %s\n", strerror(errno));
 			free(list);
-			pthread_mutex_destroy(&lock);
-			//TODO add destroy to cond too - whenever error occur
+			pthread_mutex_destroy(&(list->lock));
+			pthread_cond_destroy(&(list->notEmpty));
 			exit(errno);
 		}
 	}
@@ -105,7 +106,7 @@ void intlist_init(intlist * list){
 	// if no open spot was found -- database is full -- double database size
 	if (!foundOpenSpot){ 
 		databaseSize = databaseSize * 2;
-		intlist * databaseList = (intlist *) realloc(databaseList, sizeof(intlist)*databaseSize);
+		databaseList = (intlist *) realloc(databaseList, sizeof(intlist)*databaseSize);
 		if (databaseList == NULL){
 			printf("Error allocation memory for new data struct: %s\n", strerror(errno));
 			free(list);
@@ -113,10 +114,11 @@ void intlist_init(intlist * list){
 			//TODO free database and lists in it
 			exit(errno);
 		}
+		// move new list to an open spot
+		databaseList[ (databaseSize / 2) + 1 ] = list;
 	}
 
-	// move new list to an open spot
-	databaseList[ (databaseSize / 2) + 1 ] = list;
+	
 
 }
 
@@ -134,12 +136,12 @@ void intlist_push_head(intlist * list, int val){
 		exit(errno);
 	}
 	newNode->prev = NULL; // this is the head now
+	newNode->value = val; // update value
 
 	pthread_mutex_lock(&(list->lock)); // lock
 
 	newNode->next = oldHead; // points to old head
 	oldHead->prev = newNode; // points to new node
-	newNode->value = val; // update value
 	newNode->size = oldHead->size + 1; // update size
 	newNode->lock = oldHead->lock; // both nodes share the same mutex
 
@@ -148,6 +150,8 @@ void intlist_push_head(intlist * list, int val){
 	pthread_cond_signal(&(list->notEmpty)); // signal that list is not empty
 	pthread_mutex_unlock(&(list->lock)); // unlock
 }
+
+
 
 pthread_mutex_t * intlist_get_mutex(intlist * list){
 	if (list == NULL){
@@ -159,6 +163,8 @@ pthread_mutex_t * intlist_get_mutex(intlist * list){
 	return &(list->lock); // check if its true at all....
 }
 
+
+
 int intlist_size(intlist * list){
 	if (list == NULL){
 		printf("Size not found - list is NULL!\n");
@@ -167,5 +173,108 @@ int intlist_size(intlist * list){
 	}
 
 	return (list->size); 
+}
+
+
+int intlist_pop_tail(intlist * list){
+	if (list == NULL){
+		printf("Cant pop tail - list is NULL!\n");
+		return NULL;
+		//TODO need to exit program??
+	}
+	int popValue; // value to be returned
+
+	pthread_mutex_lock(&(list->lock)); // lock
+	while (list->size == 0){ // list is empty
+			pthread_cond_wait(&(list->notEmpty), &(list->lock)); // wait here until list has at least one item
+	}
+	// pop tail:
+	struct intlist * current = list;
+	while (current->next != NULL){
+				current = current->next;
+	}
+	// current is now the tail to be removed
+	popValue = current->value;
+	(list->size)--;
+	free(current); // check if it sets to (current->prev)->next to NULL
+	pthread_mutex_unlock(&(list->lock)); // unlock
+
+	return popValue;
+	 
+}
+
+
+
+void intlist_remove_last_k(intlist * list, int k){
+	if ((list == NULL) || (k<1)){ // check for invalid arguments
+		printf("Cant pop tail - list is NULL!\n");
+		return NULL;
+		//TODO need to exit program??
+	}
+
+	int i; // iteration index
+	for (i=0; i<k; i++){
+		intlist_pop_tail(list);
+	}
+
+}
+
+void intlist_destroy(intlist * list){
+	if (list == NULL) // nothing to free
+		return;
+
+	int size = list->size;
+	int i;
+	pthread_mutex_destroy(intlist_get_mutex(list)); // destroy mutex field
+	pthread_cond_destroy(&(list->notEmpty)); // destroy cond var field
+	for(i=0; i<size; i++){
+		if (intlist_pop_tail(list) == NULL){
+			printf("Error while trying to delete the %d-th item from list\n",i);
+			exit(-1);//TODO what else?
+		}
+	}
+}
+
+//////////////////////////////////////
+
+void main(int argc, char *argv[]){
+	if (argc != 5){
+		printf("Invalid number of arguments to main function\n");
+		exit(-1);
+	}
+
+	struct intlist list;
+	// init variables
+	char * ptr; // for strtol function
+	errno = 0;
+	long WNUM = strtol(argv[1], &ptr, 10);
+	if (errno != 0){
+		printf("Error converting WNUM from string: %s\n", strerror(errno));
+		exit(errno);
+	}
+
+	errno = 0;
+	long RNUM = strtol(argv[2], &ptr, 10);
+	if (errno != 0){
+		printf("Error converting RNUM from string: %s\n", strerror(errno));
+		exit(errno);
+	}
+
+	errno = 0;
+	long MAX = strtol(argv[3], &ptr, 10);
+	if (errno != 0){
+		printf("Error converting MAX from string: %s\n", strerror(errno));
+		exit(errno);
+	}
+
+	errno = 0;
+	long TIME = strtol(argv[4], &ptr, 10);
+	if (errno != 0){
+		printf("Error converting TIME from string: %s\n", strerror(errno));
+		exit(errno);
+	}
+
+	intlist_init(&list); // init the list
+
 }
 
