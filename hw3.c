@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX 10 // init database to this size at first
+#define INITIAL_SIZE 10 // init database to this size at first
 
 //pthread_mutex_t lock; // our global mutex
 /*typdedef struct myListsDatabase{
@@ -18,7 +18,7 @@
 // data structure including list and mutex
 struct intlist {
 	int value; // assume positive integer
-	intlist * prev; // pointer to previous node
+	intlist * prev; // pointer to previous node 
 	intlist * next; // pointer to next node;
 	int size; // number of elements in list
 	pthread_mutex_t lock;
@@ -27,7 +27,8 @@ struct intlist {
 
 intlist * databaseList = NULL; // global var - list of ALL doubly linked-lists
 int numOfLists = 0; // global var - sum of ALL existing doubly linked-lists
-int databaseSize = MAX; // global var - number of the size of databaseList
+int databaseSize = INITIAL_SIZE; // global var - number of the size of databaseList
+pthread_cond_t GC; // garbage collector - currently we have only one
 
 // headers:
 void intlist_init(intlist * list);
@@ -60,7 +61,7 @@ void intlist_init(intlist * list){
 	// create new mutex for current list and check for errors
 	returnVal = pthread_mutex_init(&(list->lock), NULL);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_init(): %s\n", strerror(rc));
+		printf("ERROR in pthread_mutex_init(): %s\n", strerror(returnVal);
 		free(list);
 		exit(errno); 
 	}
@@ -68,7 +69,7 @@ void intlist_init(intlist * list){
 	// create new conditional variable for current list and check for errors
 	returnVal = pthread_cond_init(&(list->notEmpty), NULL);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_cond_init(): %s\n", strerror(rc));
+		printf("ERROR in pthread_cond_init(): %s\n", strerror(returnVal));
 		pthread_mutex_destroy(&(list->lock));
 		free(list);
 		//TODO destroy more
@@ -138,8 +139,12 @@ void intlist_push_head(intlist * list, int val){
 	newNode->prev = NULL; // this is the head now
 	newNode->value = val; // update value
 
-	pthread_mutex_lock(&(list->lock)); // lock
-
+	int returnVal = pthread_mutex_lock(&(list->lock)); // lock
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_lock(): %s\n");
+		free(list);
+		exit(-1); 
+	}
 	newNode->next = oldHead; // points to old head
 	oldHead->prev = newNode; // points to new node
 	newNode->size = oldHead->size + 1; // update size
@@ -147,8 +152,18 @@ void intlist_push_head(intlist * list, int val){
 
 	list = newNode; // list suppose to point to the new head
 
-	pthread_cond_signal(&(list->notEmpty)); // signal that list is not empty
-	pthread_mutex_unlock(&(list->lock)); // unlock
+	returnVal = pthread_cond_signal(&(list->notEmpty)); // signal that list is not empty
+	if (returnVal != 0) {
+		printf("ERROR in pthread_cond_signal(): %s\n");
+		free(list);
+		exit(-1); 
+	}
+	returnVal = pthread_mutex_unlock(&(list->lock)); // unlock
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_unloxk(): %s\n");
+		free(list);
+		exit(-1); 
+	}
 }
 
 
@@ -183,8 +198,13 @@ int intlist_pop_tail(intlist * list){
 		//TODO need to exit program??
 	}
 	int popValue; // value to be returned
-
-	pthread_mutex_lock(&(list->lock)); // lock
+	int returnVal; // return value to be check from varoits functions
+	returnVal = pthread_mutex_lock(&(list->lock)); // lock
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_lock(): %s\n");
+		free(list);
+		exit(-1); 
+	}
 	while (list->size == 0){ // list is empty
 			pthread_cond_wait(&(list->notEmpty), &(list->lock)); // wait here until list has at least one item
 	}
@@ -197,7 +217,12 @@ int intlist_pop_tail(intlist * list){
 	popValue = current->value;
 	(list->size)--;
 	free(current); // check if it sets to (current->prev)->next to NULL
-	pthread_mutex_unlock(&(list->lock)); // unlock
+	returnVal = pthread_mutex_unlock(&(list->lock)); // unlock
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_unlock(): %s\n");
+		free(list);
+		exit(-1); 
+	}
 
 	return popValue;
 	 
@@ -225,8 +250,22 @@ void intlist_destroy(intlist * list){
 
 	int size = list->size;
 	int i;
-	pthread_mutex_destroy(intlist_get_mutex(list)); // destroy mutex field
-	pthread_cond_destroy(&(list->notEmpty)); // destroy cond var field
+	int returnVal;
+
+	returnVal = pthread_mutex_destroy(intlist_get_mutex(list)); // destroy mutex field
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_destroy(): %s\n");
+		free(list);
+		exit(-1); 
+	}
+
+	returnVal = pthread_cond_destroy(&(list->notEmpty)); // destroy cond var field
+	if (returnVal != 0) {
+		printf("ERROR in pthread_mutex_destroy(): %s\n");
+		free(list);
+		exit(-1); 
+	}
+
 	for(i=0; i<size; i++){
 		if (intlist_pop_tail(list) == NULL){
 			printf("Error while trying to delete the %d-th item from list\n",i);
@@ -243,9 +282,11 @@ void main(int argc, char *argv[]){
 		exit(-1);
 	}
 
-	struct intlist list;
+	struct intlist list; // single doubly linked list
 	// init variables
 	char * ptr; // for strtol function
+	int returnVal; // return value to be check from various functions
+
 	errno = 0;
 	long WNUM = strtol(argv[1], &ptr, 10);
 	if (errno != 0){
@@ -274,7 +315,31 @@ void main(int argc, char *argv[]){
 		exit(errno);
 	}
 
+	if ((WNUM<0) || (RNUM<0) || (TIME<0) || (MAX<0)){ // check for invalid arguments
+		printf("Invalid argument was entered\n: %s\n");
+		exit(-1);
+	}
+
 	intlist_init(&list); // init the list
+
+	returnVal = pthread_cond_init(&GC, NULL); // defining a cond var for garbage collector
+	if (returnVal != 0) {
+		printf("ERROR in pthread_cond_init(): %s\n");
+		free(list);
+		exit(-1); 
+	}
+
+/*
+	pthread_t threads[3];
+  pthread_attr_t attr;
+ pthread_cond_init (&count_threshold_cv, NULL);
+
+  //For portability, explicitly create threads in a joinable state
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+  pthread_create(&threads[0], &attr, watch_count, (void *)t1);
+  pthread_create(&threads[1], &attr, inc_count, (void *)t2);
+pthread_create(&threads[2], &attr, inc_count, (void *)t3); */
 
 }
 
