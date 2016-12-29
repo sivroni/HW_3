@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
 #define INITIAL_SIZE 10 // init database to this size at first
@@ -14,6 +15,7 @@
 // Notes:
 // 1. Free memory when needed + errors
 // 2. Make sure I used locks for the minimum time + minimum lock/unlock operations
+// 3. Make ALL functions besides init and destroy threadsafe!
 
 // data structure including list and mutex
 struct intlist {
@@ -29,6 +31,7 @@ intlist * databaseList = NULL; // global var - list of ALL doubly linked-lists
 int numOfLists = 0; // global var - sum of ALL existing doubly linked-lists
 int databaseSize = INITIAL_SIZE; // global var - number of the size of databaseList
 pthread_cond_t GC; // garbage collector - currently we have only one
+pthread_mutex_t GC_mutex; // mutex for garbage collector
 
 // headers:
 void intlist_init(intlist * list);
@@ -275,6 +278,47 @@ void intlist_destroy(intlist * list){
 }
 
 //////////////////////////////////////
+void * writer_routine(){
+	int num; // number to push in the list
+	// infinite loop
+	while(1){
+		num = rand();
+		intlist_push_head(databaseList[0], num); // specificly to list[0]
+		if (databaseList[0]->size > MAX){ // maybe we need to signal to GC
+			pthread_cond_signal(&GC);
+		}
+	}
+}
+
+
+void * reader_routine(){
+	int num; // number to push in the list
+	// infinite loop
+	while(1){
+		num = rand();
+		intlist_pop_tail(databaseList[0]); // specificly to list[0]
+	}
+}
+
+void printList(intlist * list){
+	// we need to print the size and then all the elements in list
+	if (!list){
+		printf("List in NULL, nothing to print...\n");
+		return;
+	}
+	int size = intlist_size(list); // this is the size of the list
+	int i;
+	intlist * curr = list; // ptr to list
+	printf("The size of the list is:%d \n", size);
+
+	for (i=0; i<size; i++){
+		printf("The %d-th element is %d ,", i, curr->value);
+		curr = curr->next;
+	}
+	printf("\n");
+
+}
+//////////////////////////////////////
 
 void main(int argc, char *argv[]){
 	if (argc != 5){
@@ -316,30 +360,101 @@ void main(int argc, char *argv[]){
 	}
 
 	if ((WNUM<0) || (RNUM<0) || (TIME<0) || (MAX<0)){ // check for invalid arguments
-		printf("Invalid argument was entered\n: %s\n");
+		printf("Invalid argument was entered\n");
 		exit(-1);
 	}
 
 	intlist_init(&list); // init the list
 
-	returnVal = pthread_cond_init(&GC, NULL); // defining a cond var for garbage collector
+	returnVal = pthread_cond_init(&GC, NULL); // defining a cond var for garbage collector - MAYBE I NEED A FUNCTION IN HERE?
 	if (returnVal != 0) {
-		printf("ERROR in pthread_cond_init(): %s\n");
-		free(list);
+		printf("ERROR in pthread_cond_init()\n");
+		intlist_destroy(list);
 		exit(-1); 
 	}
 
-/*
-	pthread_t threads[3];
-  pthread_attr_t attr;
- pthread_cond_init (&count_threshold_cv, NULL);
+	// create WNUM threads for writers:
+	pthread_t * writers = (pthread_t *) malloc(sizeof(pthread_t)*WNUM);
+	if (writers == NULL){
+		printf("Error allocating the writers threads: %s\n", strerror(errno));
+		intlist_destroy(list);
+		exit(errno);
+	}
+	pthread_attr_t attr; //TODO read about this...
+	int i; // iteration index - iterate and create threads
+	srand(time(NULL)); // in order to generate random numbers
 
-  //For portability, explicitly create threads in a joinable state
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-  pthread_create(&threads[0], &attr, watch_count, (void *)t1);
-  pthread_create(&threads[1], &attr, inc_count, (void *)t2);
-pthread_create(&threads[2], &attr, inc_count, (void *)t3); */
+	returnVal = pthread_attr_init(&attr);
+	if(returnVal!= 0){
+		printf("ERROR in pthread_attr_init()\n");
+		intlist_destroy(list);
+		free(writers);
+		exit(-1); 
+	}
+	returnVal = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	if(returnVal!= 0){
+			printf("ERROR in pthread_attr_setdetachstate()\n");
+			intlist_destroy(list);
+			free(writers);
+			//destroy pthead
+			exit(-1); 
+	}
 
+
+	for (i=0; i<WNUM; i++){
+		returnVal = pthread_create(&writers[i], &attr, writer_routine, NULL);
+		if(returnVal!= 0){
+			printf("ERROR in pthread_create()\n");
+			intlist_destroy(list);
+			free(writers);
+			//destroy pthead
+			exit(-1); 
+		}
+	}
+
+
+	// create RNUM threads for readers:
+	pthread_t * readers = (pthread_t *) malloc(sizeof(pthread_t)*RNUM);
+	if (readers == NULL){
+		printf("Error allocating the readers threads: %s\n", strerror(errno));
+		intlist_destroy(list);
+		exit(errno);
+	}
+
+	for (i=0; i<RNUM; i++){
+		returnVal = pthread_create(&readers[i], &attr, reader_routine, NULL);
+		if(returnVal!= 0){
+			printf("ERROR in pthread_create()\n");
+			intlist_destroy(list);
+			free(writers);
+			free(readers);
+			//destroy pthead
+			exit(-1);
+		} 
+	}
+
+
+	sleep(TIME);
+
+	// stop all running threads - maybe exit first and then join?  
+
+	//Wait for all threads to complete
+	for (i=0; i< RNUM; i++) {
+ 		pthread_join(readers[i], NULL); // maybe change from NULL to actual return value to be checked?
+	}
+	for (i=0; i<WNUM; i++) {
+		pthread_join(writers[i], NULL);  // maybe change from NULL to actual return value to be checked?
+	}
+
+
+	// prints size + list elements - make a function for that
+
+	printList(databaseList[0]);
+
+	// cleanup + exit gracefully - make function for exiting the program
+	pthread_attr_destroy(&attr);
+	pthread_mutex_destroy(&GC_mutex);
+	pthread_cond_destroy(&GC);
+	pthread_exit(NULL);
 }
 
