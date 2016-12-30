@@ -6,10 +6,10 @@
 
 
 // Notes:
-// 1. Free memory when needed + errors
+// 1. Free memory when needed + errors + create a destroy function
 // 2. Make sure I used locks for the minimum time + minimum lock/unlock operations
 // 3. Make ALL functions besides init and destroy threadsafe!
-// 4. The func of GC needs to have 2 arguments - one is the list, the second is MAX -- should bw global!
+// 4. DONE >> The func of GC needs to have 2 arguments - one is the list, the second is MAX -- should bw global!
 // 5. remove last k - if k<0 then exit without printf or errors
 // 6. We can lock the mutex twice - just make sure thar same num of unlock was done too.
 // 7. How to exit the threads if not from routine?
@@ -327,29 +327,34 @@ void * reader_routine(){
 void * GC_routine(){
 
 	int num; // number of items to delete
-	int returnVal = pthread_mutex_lock(&(myGlobalList->lock)); // lock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_lock(): %s\n");
-		//TODO terminate program
-		exit(-1); 
-	}
+	
 
 	while(1){
 		//while(intlist_size(myGlobalList) < MAX){
+		int returnVal = pthread_mutex_lock(&(myGlobalList->lock)); // lock
+			if (returnVal != 0) {
+				printf("ERROR in pthread_mutex_lock(): %s\n");
+				//TODO terminate program
+				exit(-1); 
+			}
+
  			pthread_cond_wait(&GC, &(myGlobalList->lock));
  			// now we finished waiting
+
  			num = (intlist_size(myGlobalList) + 2 - 1) / 2; // half of the size, rounded up
  			intlist_remove_last_k(myGlobalList,num);
  			printf("GC - %d items removed from list\n", num);
+
+ 			returnVal = pthread_mutex_unlock(&(myGlobalList->lock)); // unlock
+			if (returnVal != 0) {
+				printf("ERROR in pthread_mutex_unlock(): %s\n");
+				//TODO terminate program
+				exit(-1); 
+			}
 		//}
 	}
 
-	returnVal = pthread_mutex_unlock(&(myGlobalList->lock)); // unlock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_unlock(): %s\n");
-		//TODO terminate program
-		exit(-1); 
-	}
+	
 	
 
 }
