@@ -16,11 +16,19 @@
 // 7. How to exit the threads if not from routine?
 
 // data structure including list and mutex
+
+
+struct _intlist_item{
+  int value;
+  struct _intlist_item *prev;
+  struct _intlist_item *next;
+} ;
+
+typedef struct _intlist_item intlist_item; // removed the * !!!
+
+
 struct intlist {
-	int value; // assume positive integer
-	struct intlist * prev; // pointer to previous node 
-	struct intlist * next; // pointer to next node;
-	//intlist_item * head;
+	intlist_item * head;
 	int size; // number of elements in list
 	pthread_mutex_t lock;
 	pthread_cond_t notEmpty; // cond variable
@@ -29,12 +37,7 @@ struct intlist {
 
 struct intlist myGlobalList; // global list
 
-/*typedef struct intlist_item {
-  int value;
-  inlist_item *prev;
-  inlist_item *next;
-} intlist_item;
-*/
+
 
 
 pthread_cond_t GC; // garbage collector
@@ -56,13 +59,6 @@ void intlist_init(struct intlist * list){
 	printf("Entered init...\n");
 	int returnVal; // return value from creating the mutex
 	int i; // iteration index
-
-	// create a new list
-	/*list = (struct intlist *) malloc(sizeof(struct intlist));
-	if (list == NULL){
-		printf("Error allocation memory for new node: %s\n", strerror(errno));
-		exit(errno);
-	}*/
 
 	// init size to zero at first
 	list->size = 0;
@@ -112,7 +108,7 @@ void intlist_push_head(struct intlist * list, int val){
 		exit(-1);
 	}
 
-	struct intlist * newNode = (struct intlist *) malloc(sizeof(struct intlist));
+	intlist_item * newNode = (intlist_item *) malloc(sizeof(intlist_item));
 	if (newNode == NULL){
 			printf("Error allocation memory for new node: %s\n", strerror(errno));
 			//TODO terminate program
@@ -121,27 +117,32 @@ void intlist_push_head(struct intlist * list, int val){
 
 
 	// insert as head:
-	if (intlist_size(list) == 0 ){
-
+	if (intlist_size(list) == 0){
+		
 		int returnVal = pthread_mutex_lock(&list->lock); // lock
+		
 		if (returnVal != 0) {
 			printf("ERROR in pthread_mutex_lock()\n");
 		//	free(list);
 			exit(-1); 
 		}
+
+		//(*(newNode))->prev = NULL;
+		//(*(newNode))->next = NULL;
+		
 		newNode->prev = NULL;
 		newNode->next = NULL;
-		newNode->size = 1;
+		
+		list->size = 1;
+		//(*(newNode))->value = val;
 		newNode->value = val;
-		newNode->lock = list->lock;
-		newNode->notEmpty = list->notEmpty; // cond variable
-		newNode->attr = list->attr;
+		
+		(list->head) = newNode; // global list gets the address of newNode
+		
+		//printf("FROM PUSH - list->size is %d and newNode->size is %d with value of list->value%d\n",list->size, newNode->size, list->value);
+		//printf("myGlob address is:%p, list adress is:%p, newNode address is%p\n", (void *) &myGlobalList, (void *) list, (void *) newNode);
+		//printf("myGlobalList->value = %d, myGlobalList->size = %d\n", (&(myGlobalList))->value, (&(myGlobalList))->size);
 
-		list = newNode; // global list gets the address of newNode
-
-		printf("FROM PUSH - list->size is %d and newNode->size is %d with value of list->value%d\n",list->size, newNode->size, list->value);
-		printf("myGlob address is:%p, list adress is:%p, newNode address is%p\n", (void *) &myGlobalList, (void *) list, (void *) newNode);
-		printf("myGlobalList->value = %d, myGlobalList->size = %d\n", (&(myGlobalList))->value, (&(myGlobalList))->size);
 		returnVal = pthread_cond_signal(&list->notEmpty); // signal that list is not empty
 		if (returnVal != 0) {
 			printf("ERROR in pthread_cond_signal()\n");
@@ -164,7 +165,7 @@ void intlist_push_head(struct intlist * list, int val){
 		}
 
 		printf("Exit push head - from FIRST INSERTION...\n");
-		printf("\n");
+		//printf("\n");
 		return;
 	}
 
@@ -172,8 +173,9 @@ void intlist_push_head(struct intlist * list, int val){
 
 	//struct intlist * oldHead = list; // save old head
 	
-	newNode->prev = NULL; // this is the head now
-	newNode->value = val; // update value
+	//(*(newNode))->prev = NULL; // this is the head now
+	//(*(newNode))->value = val; // update value
+	
 
 	int returnVal = pthread_mutex_lock(&list->lock); // lock
 	if (returnVal != 0) {
@@ -181,14 +183,17 @@ void intlist_push_head(struct intlist * list, int val){
 	//	free(list);
 		exit(-1); 
 	}
-	newNode->next = list; // points to old head
-	list->prev = newNode; // points to new node
-	newNode->size = intlist_size(list) + 1; // update size
-	newNode->lock = list->lock; // both nodes share the same mutex
-	newNode->attr = list->attr;
-	newNode->notEmpty = list->notEmpty;
 
-	list = newNode; // list points to the new head
+	intlist_item * oldHead = list->head;
+
+	newNode->prev = NULL;
+	newNode->value = val;
+	newNode->next = oldHead; // points to old head
+	oldHead->prev = newNode; // points to new node
+	list->size = intlist_size(list) + 1; // update size
+
+	//list->head = newNode; // list points to the new head
+	list->head = newNode; // global list gets the address of newNode
 
 	returnVal = pthread_cond_signal(&list->notEmpty); // signal that list is not empty
 	if (returnVal != 0) {
@@ -269,19 +274,20 @@ int intlist_pop_tail(struct intlist * list){
 		exit(-1); 
 	}
 
-	while (list->size == 0){ // list is empty
+	while (intlist_size(list) == 0){ // list is empty
 			pthread_cond_wait(&list->notEmpty, &list->lock); // wait here until list has at least one item
 	}
 
 	// pop tail:
-	struct intlist * current = list;
+	//struct intlist * current = list;
+	intlist_item * current = list->head;
 	while (current->next != NULL){
 				current = current->next;
 	}
 	// current is now the tail to be removed
 
 	popValue = current->value;
-	list->size = list->size -1;
+	list->size = intlist_size(list) -1;
 
 	free(current); // check if it sets to (current->prev)->next to NULL
 
@@ -316,7 +322,7 @@ void intlist_remove_last_k(struct intlist * list, int k){
 
 
 	int i, returnVal;
-	int size = intlist_size(list);
+	
 
 	returnVal = pthread_mutex_lock(&list->lock); // lock
 	if (returnVal != 0) {
@@ -325,15 +331,18 @@ void intlist_remove_last_k(struct intlist * list, int k){
 		exit(-1); 
 	}
 
+	int size = intlist_size(list);
 	if (k <= size){
 		for (i=0; i<k; i++){
 			intlist_pop_tail(list);
+			printList(&myGlobalList);
 		}
 	}
 
 	else{
 		for (i=0; i<size; i++){
 			intlist_pop_tail(list);
+			printList(&myGlobalList);
 		}
 	}
 
@@ -355,7 +364,7 @@ void intlist_destroy(struct intlist * list){
 		exit(-1);
 	}		
 
-	int size = intlist_size(list);
+	
 	int i;
 	int returnVal;
 
@@ -373,6 +382,7 @@ void intlist_destroy(struct intlist * list){
 		exit(-1); 
 	}
 
+	int size = intlist_size(list);
 	intlist_remove_last_k(list,size); // pop and destroy all the items
 	
 	free(list);
@@ -389,31 +399,34 @@ void * writer_routine(){
 		num = rand();
 
 		intlist_push_head(&myGlobalList, num); 
-		printf("Now check size head from writer routine... \n");
+		//printf("Now check size head from writer routine... \n");
 		if ( intlist_size(&myGlobalList) > MAX ){ // signal to GC
 			pthread_cond_signal(&GC);
-			printf("a signal was sent to GC");
+			printf("\n");
+			printf("a signal was sent to GC\n");
+			printf("\n");
 		}
 
 		if (exitFlag == 1)
 			pthread_exit(NULL);
 
 		printList(&myGlobalList);
+		printf("\n");
 		
 	}
 }
 
 
 void * reader_routine(){
-	int num; // number to push in the list
+
 	// infinite loop
 	while(1){
 		printf("Entered READER ROUTINE\n");
-		num = rand();
 		intlist_pop_tail(&myGlobalList); 
-
+		printList(&myGlobalList);
 		if (exitFlag == 2)
 			pthread_exit(NULL);
+		printf("\n");
 	}
 }
 
@@ -433,7 +446,9 @@ void * GC_routine(){
 
  			pthread_cond_wait(&GC, (intlist_get_mutex(&myGlobalList)));
  			// now we finished waiting
-
+ 			printf("\n");
+ 			printf("GC finished waiting!\n");
+ 			printf("\n");
  			num = (intlist_size(&myGlobalList) + 2 - 1) / 2; // half of the size, rounded up
  			intlist_remove_last_k(&myGlobalList,num);
  			printf("GC - %d items removed from list\n", num);
@@ -450,9 +465,6 @@ void * GC_routine(){
 		
 	}
 
-	
-	
-
 }
 
 
@@ -463,17 +475,17 @@ void printList(struct intlist * list){ // needs to be thread safe?
 		printf("List in NULL, nothing to print...\n");
 		return;
 	}
-	printf("Now check size head from printList... \n");
+	//printf("Now check size head from printList... \n");
 	int size = intlist_size(list); // this is the size of the list
 	int i;
-	struct intlist * curr = list; // ptr to list
+	intlist_item * curr = list->head; // ptr to list
 	printf("The size of the list is:%d \n", size);
 
 	for (i=0; i<size; i++){
 		printf("The %d-th element is %d ,", i, curr->value);
 		curr = curr->next;
 	}
-	printf("\n");
+	//printf("\n");
 
 }
 //////////////////////////////////////
