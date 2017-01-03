@@ -12,7 +12,7 @@ struct _intlist_item{
   int value;
   struct _intlist_item *prev;
   struct _intlist_item *next;
-} ;
+};
 
 typedef struct _intlist_item intlist_item; 
 
@@ -27,8 +27,6 @@ struct intlist {
 };
 
 struct intlist myGlobalList; // global list
-
-
 
 
 pthread_cond_t GC; // garbage collector
@@ -364,52 +362,22 @@ void * GC_routine(void *t){
 	 			intlist_remove_last_k(&myGlobalList,num);
 	 			printf("GC - %d items removed from list\n", num);
 
-	 			returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-				if (returnVal != 0) {
-					printf("ERROR in pthread_mutex_unlock():%s\n", strerror(returnVal));
-					exit(-1); 
-				}
-
-				if (exitFlag == 3){
-					pthread_exit(NULL);
-				}
 			}
 			else{
-				returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-				if (returnVal != 0) {
+				
+			}
+			returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
+			if (returnVal != 0) {
 					printf("ERROR in pthread_mutex_unlock():%s\n", strerror(returnVal));
 					exit(-1); 
-				}
-
-				if (exitFlag == 3){
-					pthread_exit(NULL);
-			}
-		}
-
-			/*returnVal = pthread_mutex_lock(intlist_get_mutex(&myGlobalList)); // lock
-			if (returnVal != 0) {
-					printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));	
-					exit(-1); 
-			}
-
- 			pthread_cond_wait(&GC, (intlist_get_mutex(&myGlobalList)));
- 			// now we finished waiting
- 			num = (intlist_size(&myGlobalList) + 2 - 1) / 2; // half of the size, rounded up
- 			intlist_remove_last_k(&myGlobalList,num);
- 			printf("GC - %d items removed from list\n", num);
-
- 			returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-			if (returnVal != 0) {
-				printf("ERROR in pthread_mutex_unlock():%s\n", strerror(returnVal));
-				exit(-1); 
 			}
 
 			if (exitFlag == 3){
-				pthread_exit(NULL);
-			}*/
-		
+					pthread_exit(NULL);
+			}
 	}
 }
+
 
 //////////////////////////////////////
 
