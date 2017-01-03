@@ -8,17 +8,21 @@
 
 // Notes:
 // 1. DONE >> Free memory when needed + errors + create a destroy function
-// 2. Make sure I used locks for the minimum time + minimum lock/unlock operations - What about pop?
+// 2. Make sure I used locks for the minimum time + minimum lock/unlock operations
 // 3. DONE >> Make ALL functions besides init and destroy threadsafe!
 // 4. DONE >> The func of GC needs to have 2 arguments - one is the list, the second is MAX -- should bw global!
 // 5. DONE >> remove last k - if k<0 then exit without printf or errors
 // 6. DONE >> We can lock the mutex twice - just make sure thar same num of unlock was done too.
 // 7. DONE >> How to exit the threads if not from routine?
-// 8. maintain tail pointer for the pop method + check edge cases in pop tail
+// 8. DONE >> maintain tail pointer for the pop method + check edge cases in pop tail
 // 9. Check return values - print this string when possible 
 // 10.Change name of file to hw3
-// 11. What if gc cleans half and then right away we have num > MAX ? Call GC right away? 
-// 12. init all vars in the start
+// 11. DONE >> What if gc cleans half and then right away we have num > MAX ? Call GC right away? 
+// 12. DONE >> init all vars in the start
+// 13. DONE >> change destroy func
+// 14. remove all printings + comments
+// 15. DONE >> valgrind
+// 16. check 3 lists
 
 // struct for list node
 struct _intlist_item{
@@ -32,6 +36,7 @@ typedef struct _intlist_item intlist_item;
 // struct for the "outside" list, including nodes and more features
 struct intlist {
 	intlist_item * head; // linked list of the nodes
+	intlist_item * tail;
 	int size; // number of elements in list
 	pthread_mutex_t lock; // mutex that locks the list
 	pthread_cond_t notEmpty; // cond variable
@@ -62,7 +67,7 @@ void intlist_init(struct intlist * list){
 	printf("Entered init...\n");
 	int returnVal; // return value from creating the mutex
 	int i; // iteration index
-
+	srand(time(NULL)); // in order to generate random numbers
 	// init size to zero at first
 	list->size = 0;
 
@@ -107,14 +112,14 @@ void intlist_push_head(struct intlist * list, int val){
 		printf("Cannot push to head - list is NULL!\n");
 		exit(-1);
 	}
-
+	int returnVal;
 	intlist_item * newNode = (intlist_item *) malloc(sizeof(intlist_item));
 	if (newNode == NULL){
 			printf("Error allocation memory for new node: %s\n", strerror(errno));
 			exit(errno);
 	}
 
-	int returnVal = pthread_mutex_lock(&list->lock); // lock
+	returnVal = pthread_mutex_lock(&list->lock); // lock
 		
 		if (returnVal != 0) {
 			printf("ERROR in pthread_mutex_lock()\n");
@@ -133,7 +138,7 @@ void intlist_push_head(struct intlist * list, int val){
 		newNode->value = val;
 		
 		(list->head) = newNode; // global list gets the address of newNode
-
+		list->tail = newNode;
 
 		printf("Exit push head - from FIRST INSERTION...\n");
 		
@@ -192,14 +197,14 @@ int intlist_size(struct intlist * list){
 		exit(-1);
 	
 	}
-
+	int size;
 	int returnVal = pthread_mutex_lock(&list->lock); // lock
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_lock()\n");
 		exit(-1); 
 	}
 
-	int size = list->size;
+	size = list->size;
 	printf("SIZE FUNC- size is %d\n", size);
 
 	returnVal = pthread_mutex_unlock(&list->lock); // unlock
@@ -229,37 +234,29 @@ int intlist_pop_tail(struct intlist * list){
 	}
 
 	while (intlist_size(list) == 0){ // list is empty
-		printf("waiting...\n");
-		//if (exitFlag != 0){
-		//	printf("entered broadcast...\n");
-		//	pthread_cond_broadcast(&list->notEmpty);
-		//}
-				 
+		printf("waiting...\n"); 
 		pthread_cond_wait(&list->notEmpty, &list->lock); // wait here until list has at least one item
 	}
 
-	// pop tail:
-	intlist_item * current = list->head;
-	intlist_item * previous = list->head;
-	while (current->next != NULL){
-				previous = current; 
-				current = current->next;
-	}
-
-	// current is now the tail to be removed
+	intlist_item * current = list->tail;
+	intlist_item * previous = list->tail->prev;
 
 	popValue = current->value;
 	list->size = intlist_size(list) -1;
 
 	printf("We aree freeing: %d\n", popValue);
 	free(current); // check if it sets to (current->prev)->next to NULL
-	previous->next = NULL;
-
+	list->tail = previous;
+	if (previous != NULL)
+		previous->next = NULL;
+	
+	//printf("** tail after deletion is: %d, head after deletion is:%d\n", list->tail->value, list->head->value);
 	returnVal = pthread_mutex_unlock(&list->lock); // unlock
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_unlock(): \n");
 		exit(-1); 
 	}
+	
 	printf("Exit pop tail...\n");
 	return popValue;
 	 
@@ -269,9 +266,13 @@ int intlist_pop_tail(struct intlist * list){
 
 void intlist_remove_last_k(struct intlist * list, int k){
 	printf("Entered remove last k...\n");
-	if ((list == NULL) || (k<0)){ // check for invalid arguments
-		printf("Cant pop tail - list is NULL or invalid number was entered!\n");
+	if ((list == NULL) ){ // check for invalid arguments
+		printf("Cant pop tail - list is NULL\n");
 		exit(-1);
+	}
+
+	if ((k<0)){ // check for invalid arguments
+		return;
 	}
 
 	if ((k == 0 )){ // check for invalid arguments
@@ -280,7 +281,7 @@ void intlist_remove_last_k(struct intlist * list, int k){
 	}
 
 
-	int i, returnVal;
+	int i, returnVal, size;
 	
 
 	returnVal = pthread_mutex_lock(&list->lock); // lock
@@ -289,7 +290,7 @@ void intlist_remove_last_k(struct intlist * list, int k){
 		exit(-1); 
 	}
 
-	int size = intlist_size(list);
+	size = intlist_size(list);
 	if (k <= size){
 		for (i=0; i<k; i++){
 			intlist_pop_tail(list);
@@ -322,7 +323,13 @@ void intlist_destroy(struct intlist * list){
 	}		
 	int i;
 	int returnVal;
+	int size;
+
+	size = intlist_size(list);
 	
+	intlist_remove_last_k(list, size);
+	//TODO add removal of elements!
+
 	returnVal = pthread_mutex_destroy(&list->lock);
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_destroy: \n");
@@ -334,9 +341,6 @@ void intlist_destroy(struct intlist * list){
 		printf("ERROR in pthread_cond_destroy(): \n");
 		exit(-1); 
 	}
-	
-	// in the print we pop all elements in list
-	//TODO add removal of elements!
 	printf("Exit destroy...\n");
 }
 
@@ -346,12 +350,7 @@ void * writer_routine(void *t){
 	int returnVal;
 	// infinite loop
 	while(1){
-		/*returnVal = pthread_mutex_lock(intlist_get_mutex(&myGlobalList)); // lock
-			if (returnVal != 0) {
-				printf("ERROR in pthread_mutex_lock(): \n");
-				//TODO terminate program
-					exit(-1); 
-				}*/
+
 		printf("Entered WRITER ROUTINE\n");
 		num = rand();
 
@@ -364,12 +363,6 @@ void * writer_routine(void *t){
 			printf("a signal was sent to GC\n");
 			printf("\n");
 		}
-
-		/*returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-		if (returnVal != 0) {
-					printf("ERROR in pthread_mutex_unlock(): \n");
-					exit(-1); 
-				}*/
 
 		if (exitFlag == 2){
 			printf("ENTERED FLAG = 2 IN WRITER ROUTINE\n");
@@ -388,24 +381,12 @@ void * reader_routine(void *t){
 	int returnVal;
 	// infinite loop
 	while(1){
-		/*returnVal = pthread_mutex_lock(intlist_get_mutex(&myGlobalList)); // lock
-		if (returnVal != 0) {
-				printf("ERROR in pthread_mutex_lock(): \n");
-				//TODO terminate program
-					exit(-1); 
-				}*/
-
 		printf("Entered READER ROUTINE\n");
 		intlist_pop_tail(&myGlobalList); 
 		printList(&myGlobalList);
 		printf("\n");
 		printf("\n");
 
-		/*returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-		if (returnVal != 0) {
-					printf("ERROR in pthread_mutex_unlock(): \n");
-					exit(-1); 
-				}*/
 		if (exitFlag == 1){
 			printf("ENTERED FLAG = 1 IN READER ROUTINE\n");
 			pthread_exit(NULL);
@@ -451,45 +432,10 @@ void * GC_routine(void *t){
 		
 	}
 }
-	/*returnVal = pthread_mutex_lock(intlist_get_mutex(&myGlobalList)); // lock
-			if (returnVal != 0) {
-				printf("ERROR in pthread_mutex_lock(): \n");
-				//TODO terminate program
-					exit(-1); 
-				}
-
-	while ( intlist_size(&myGlobalList) < MAX ) {
-
-		    pthread_cond_wait(&GC, (intlist_get_mutex(&myGlobalList)));
-
-		   // now we finished waiting
-	 			printf("\n");
-	 			printf("*** GC finished waiting!***\n");
-	 			printf("\n");
-
-		    num = (intlist_size(&myGlobalList) + 2 - 1) / 2; // half of the size, rounded up
-	 		intlist_remove_last_k(&myGlobalList,num);
-	 		printf("GC - %d items removed from list\n", num);
-
-		    
-	}
-	returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
-	if (returnVal != 0) {
-					printf("ERROR in pthread_mutex_unlock(): \n");
-					exit(-1); 
-				}
-
-	if (exitFlag == 3){
-					printf("ENTERED FLAG = 3 IN GC ROUTINE\n");
-					pthread_exit(NULL);
-	}*/
 
 
 
-
-
-
-void printList(struct intlist * list){ // needs to be thread safe?
+void printList(struct intlist * list){ // DELETE FUNC
 	// we need to print the size and then all the elements in list
 	if (!list){
 		printf("List in NULL, nothing to print...\n");
@@ -569,9 +515,14 @@ void main(int argc, char *argv[]){
 
 	intlist_init(&myGlobalList); // init the list
 	pthread_t GC_thread; // thread for garbage collector
-
 	// define attr - for join
 	pthread_attr_t attr1; 
+	int i; // iteration index - iterate and create threads
+	int k = 0; // if we need to destroy some of the threads due to error
+	//srand(time(NULL)); // in order to generate random numbers
+	pthread_t * writers;
+	pthread_t * readers;
+	int size;
 
 	returnVal = pthread_attr_init(&attr1);
 	if(returnVal!= 0){
@@ -598,17 +549,11 @@ void main(int argc, char *argv[]){
 	}	
 
 	// create WNUM threads for writers:
-	pthread_t * writers = (pthread_t *) malloc(sizeof(pthread_t)*WNUM);
+	writers = (pthread_t *) malloc(sizeof(pthread_t)*WNUM);
 	if (writers == NULL){
 		printf("Error allocating the writers threads: %s\n", strerror(errno));
 		exit(errno);
 	}
-
-	
-	int i; // iteration index - iterate and create threads
-	int k = 0; // if we need to destroy some of the threads due to error
-	srand(time(NULL)); // in order to generate random numbers
-
 	
 
 	for (i=0; i<WNUM; i++){
@@ -621,7 +566,7 @@ void main(int argc, char *argv[]){
 
 
 	// create RNUM threads for readers:
-	pthread_t * readers = (pthread_t *) malloc(sizeof(pthread_t)*RNUM);
+	readers = (pthread_t *) malloc(sizeof(pthread_t)*RNUM);
 	if (readers == NULL){
 		printf("Error allocating the readers threads: %s\n", strerror(errno));
 		exit(errno);
@@ -641,8 +586,6 @@ void main(int argc, char *argv[]){
 	// stop all running threads - 
 
 	exitFlag = 3; // now GC thread should exit, then - join
-	//printf("set broadcast...\n");
-	//pthread_cond_broadcast(&myGlobalList.notEmpty);
 	printf("flag changed to 3 in main \n");
 	pthread_join(GC_thread, NULL);
 	printf("Exited from GC \n");
@@ -668,7 +611,7 @@ void main(int argc, char *argv[]){
 
 	// prints size + list elements
 
-	int size = intlist_size(&myGlobalList);
+	size = intlist_size(&myGlobalList);
 	printf("\n");
 	printf("Printing final results:\n");
 	printf("The size of the list is:%d \n",size);
