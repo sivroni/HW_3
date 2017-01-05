@@ -45,7 +45,7 @@ pthread_mutex_t * intlist_get_mutex(struct intlist * list);
 void intlist_init(struct intlist * list){
 	int returnVal; // return value from creating the mutex
 	int i; // iteration index
-	srand(time(NULL)); // in order to generate random numbers
+	
 	// init size to zero at first
 	list->size = 0;
 
@@ -387,7 +387,7 @@ void main(int argc, char *argv[]){
 		exit(-1);
 	}
 
-	printf("Main starts...\n");
+	//printf("Main starts...\n");
 	// init variables
 	char * ptr; // for strtol function
 	int returnVal; // return value to be check from various functions
@@ -421,10 +421,11 @@ void main(int argc, char *argv[]){
 		exit(errno);
 	}
 
-	if ((WNUM<0) || (RNUM<0) || (TIME<0) || (MAX<0)){ // check for invalid arguments
+	if ((WNUM<=0) || (RNUM<=0) || (TIME<=0) || (MAX<=0)){ // check for invalid arguments
 		printf("Invalid argument was entered\n");
 		exit(-1);
 	}
+
 
 	intlist_init(&myGlobalList); // init the list
 	pthread_t GC_thread; // thread for garbage collector
@@ -436,6 +437,7 @@ void main(int argc, char *argv[]){
 	pthread_t * writers;
 	pthread_t * readers;
 	int size;
+	srand(time(NULL)); // in order to generate random numbers
 
 	returnVal = pthread_attr_init(&attr1);
 	if(returnVal!= 0){
