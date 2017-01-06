@@ -52,28 +52,27 @@ void intlist_init(struct intlist * list){
 	// create attr for recursive mutex
 	returnVal = pthread_mutexattr_init(&list->attr);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_mutexattr_init()\n");
-		free(list);
-		exit(-1); 
+		printf("ERROR in pthread_mutexattr_init()%s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 	returnVal = pthread_mutexattr_settype(&list->attr,PTHREAD_MUTEX_RECURSIVE);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_mutexattr_settype()\n");
-		exit(-1); 
+		printf("ERROR in pthread_mutexattr_settype()%s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 
 	// create new mutex for current list and check for errors
 	returnVal = pthread_mutex_init(&list->lock, &list->attr);
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_init(): %s\n", strerror(returnVal));
-		exit(errno); 
+		exit(returnVal); 
 	}
 
 	// create new conditional variable for current list and check for errors
 	returnVal = pthread_cond_init(&list->notEmpty, NULL);
 	if (returnVal != 0) {
 		printf("ERROR in pthread_cond_init(): %s\n", strerror(returnVal));
-		exit(errno); 
+		exit(returnVal); 
 	}
 
 }
@@ -96,7 +95,7 @@ void intlist_push_head(struct intlist * list, int val){
 		
 		if (returnVal != 0) {
 			printf("ERROR in pthread_mutex_lock()%s\n", strerror(returnVal));
-			exit(-1); 
+			exit(returnVal); 
 		}
 
 	// insert as head:
@@ -131,15 +130,15 @@ else{
 	
 
 	returnVal = pthread_cond_signal(&list->notEmpty); // signal that list is not empty
-		if (returnVal != 0) {
-			printf("ERROR in pthread_cond_signal()\n");
-			exit(-1); 
+	if (returnVal != 0) {
+			printf("ERROR in pthread_cond_signal()%s\n", strerror(returnVal));
+			exit(returnVal); 
 		}
 
 	returnVal = pthread_mutex_unlock(&list->lock); // unlock
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_unlock()%s\n", strerror(returnVal));
-		exit(-1); 
+		exit(returnVal); 
 	}
 
 }
@@ -179,33 +178,34 @@ int intlist_pop_tail(struct intlist * list){
 
 	int popValue; // value to be returned
 	int returnVal; // return value to be check from various functions
+	intlist_item * current;
+	intlist_item * previous;
 
 	returnVal = pthread_mutex_lock(&list->lock); // lock
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));
-		exit(-1); 
+		exit(returnVal); 
 	}
 
 	while (intlist_size(list) == 0){ // list is empty
 		pthread_cond_wait(&list->notEmpty, &list->lock); // wait here until list has at least one item
 	}
 
-	intlist_item * current = list->tail;
-	intlist_item * previous = list->tail->prev;
+	current = list->tail;
+	previous = list->tail->prev;
 
 	popValue = current->value;
 	list->size = intlist_size(list) -1;
 
-	free(current); // check if it sets to (current->prev)->next to NULL
+	free(current); 
 	list->tail = previous;
 	if (previous != NULL)
 		previous->next = NULL;
 	
-	//printf("** tail after deletion is: %d, head after deletion is:%d\n", list->tail->value, list->head->value);
 	returnVal = pthread_mutex_unlock(&list->lock); // unlock
 	if (returnVal != 0) {
 		printf("ERROR in pthread_mutex_unlock(): %s\n", strerror(returnVal));
-		exit(-1); 
+		exit(returnVal); 
 	}
 
 	return popValue;
@@ -226,17 +226,20 @@ void intlist_remove_last_k(struct intlist * list, int k){
 		}
 
 	int i, returnVal, size;
+	int isListNotEmpty; // if 0 then list is empty, 1 otherwise
+	intlist_item * nCurrent; // current->next
+	intlist_item * nodeToRemove; // we set this variable in the loop
+	intlist_item * current; // current node to remove
 
 	returnVal = pthread_mutex_lock(&list->lock); // lock
-		if (returnVal != 0) {
+	if (returnVal != 0) {
 			printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));
-			exit(-1); 
+			exit(returnVal); 
 		}
 	
 		size = intlist_size(list);
-		int isListNotEmpty = 1; // if 0 then list is empty, 1 otherwise
-		intlist_item * nodeToRemove;
-		intlist_item * current;
+		isListNotEmpty = 1; 
+		
 
 		if (size == 0){
 			current = NULL;
@@ -275,13 +278,13 @@ void intlist_remove_last_k(struct intlist * list, int k){
 		returnVal = pthread_mutex_unlock(&list->lock); // unlock
 		if (returnVal != 0) {
 			printf("ERROR in pthread_mutex_unlock(): %s\n", strerror(returnVal));
-			exit(-1); 
+			exit(returnVal); 
 		}
 
 		// free elements outside the lock is the size of the list is bigger than zero
 		if (isListNotEmpty == 1){
 			current = nodeToRemove;
-			intlist_item * nCurrent = current->next;
+			nCurrent = current->next;
 			
 			for (i=0; i<k; i++){
 				
@@ -314,14 +317,14 @@ void intlist_destroy(struct intlist * list){
 
 	returnVal = pthread_mutex_destroy(&list->lock);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_destroy: \n");
-		exit(-1); 
+		printf("ERROR in pthread_mutex_destroy: %s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 
 	returnVal = pthread_cond_destroy(&list->notEmpty); // destroy cond var field
 	if (returnVal != 0) {
-		printf("ERROR in pthread_cond_destroy(): \n");
-		exit(-1); 
+		printf("ERROR in pthread_cond_destroy():  %s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 
 }
@@ -375,7 +378,7 @@ void * GC_routine(void *t){
 			returnVal = pthread_mutex_lock(intlist_get_mutex(&myGlobalList)); // lock
 			if (returnVal != 0) {
 					printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));	
-					exit(-1); 
+					exit(returnVal); 
 			}
 
 			pthread_cond_wait(&GC, (intlist_get_mutex(&myGlobalList)));
@@ -392,7 +395,7 @@ void * GC_routine(void *t){
 			returnVal = pthread_mutex_unlock(intlist_get_mutex(&myGlobalList)); // unlock
 			if (returnVal != 0) {
 					printf("ERROR in pthread_mutex_unlock():%s\n", strerror(returnVal));
-					exit(-1); 
+					exit(returnVal); 
 			}
 
 			if (exitFlag == 3){
@@ -454,7 +457,6 @@ void main(int argc, char *argv[]){
 	// define attr - for join
 	pthread_attr_t attr1; 
 	int i; // iteration index - iterate and create threads
-	int k = 0; // if we need to destroy some of the threads due to error
 
 	pthread_t * writers;
 	pthread_t * readers;
@@ -463,26 +465,26 @@ void main(int argc, char *argv[]){
 
 	returnVal = pthread_attr_init(&attr1);
 	if(returnVal!= 0){
-		printf("ERROR in pthread_attr_init()\n");
-		exit(-1); 
+		printf("ERROR in pthread_attr_init()%s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 	returnVal = pthread_attr_setdetachstate(&attr1, PTHREAD_CREATE_JOINABLE);
 	if(returnVal!= 0){
-			printf("ERROR in pthread_attr_setdetachstate()\n");
-			exit(-1); 
+			printf("ERROR in pthread_attr_setdetachstate()%s\n", strerror(returnVal));
+			exit(returnVal); 
 	}
 
 	// create garbage collector
 	returnVal = pthread_cond_init(&GC, NULL); // defining a cond var for garbage collector
 	if (returnVal != 0) {
-		printf("ERROR in pthread_cond_init()\n");
-		exit(-1); 
+		printf("ERROR in pthread_cond_init()%s\n", strerror(returnVal));
+		exit(returnVal); 
 	}
 
 	returnVal = pthread_create(&GC_thread, &attr1, GC_routine, NULL);
 	if (returnVal != 0) {
-		printf("ERROR in pthread_create11()%s\n", strerror(returnVal));
-		exit(-1); 
+		printf("ERROR in pthread_create()%s\n", strerror(returnVal));
+		exit(returnVal); 
 	}	
 
 	// create WNUM threads for writers:
@@ -497,7 +499,7 @@ void main(int argc, char *argv[]){
 		returnVal = pthread_create(&writers[i], &attr1, writer_routine, NULL);
 		if(returnVal!= 0){
 			printf("ERROR in pthread_create()%s\n", strerror(returnVal));
-			exit(-1); 
+			exit(returnVal); 
 		}
 	}
 
@@ -513,7 +515,7 @@ void main(int argc, char *argv[]){
 		returnVal = pthread_create(&readers[i], &attr1, reader_routine, NULL);
 		if(returnVal!= 0){
 			printf("ERROR in pthread_create()%s\n", strerror(returnVal));
-			exit(-1);
+			exit(returnVal);
 		} 
 	}
 
@@ -527,26 +529,26 @@ void main(int argc, char *argv[]){
 	returnVal = pthread_join(GC_thread, NULL);
 	if(returnVal!= 0){
 			printf("ERROR in pthread_create()%s\n", strerror(returnVal));
-			exit(-1);
+			exit(returnVal);
 	} 
 
 	exitFlag = 1; // now all Readers threads suppose to exit from their routines, then - join
 
 	//Wait for all threads to be complete
 	for (i=0; i< RNUM; i++) {
- 		returnVal = pthread_join(readers[i], NULL); // maybe change from NULL to actual return value to be checked?
+ 		returnVal = pthread_join(readers[i], NULL); 
  		if(returnVal!= 0){
 			printf("ERROR in pthread_create()%s\n", strerror(returnVal));
-			exit(-1);
+			exit(returnVal);
 		} 
 	}
 
 	exitFlag = 2; // now all Writers threads suppose to exit from their routines, then - join
 	for (i=0; i<WNUM; i++) {
-		returnVal = pthread_join(writers[i], NULL);  // maybe change from NULL to actual return value to be checked?
+		returnVal = pthread_join(writers[i], NULL);  
 		if(returnVal!= 0){
 			printf("ERROR in pthread_create()%s\n", strerror(returnVal));
-			exit(-1);
+			exit(returnVal);
 		} 
 	}
 
