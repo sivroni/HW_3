@@ -166,22 +166,7 @@ int intlist_size(struct intlist * list){
 		exit(-1);
 	
 	}
-	int size;
-	int returnVal = pthread_mutex_lock(&list->lock); // lock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_lock()%s\n", strerror(returnVal));
-		exit(-1); 
-	}
-
-	size = list->size;
-
-	returnVal = pthread_mutex_unlock(&list->lock); // unlock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_unloxk()%s\n", strerror(returnVal));
-		exit(-1); 
-	}
-
-	return (size); 
+	return list->size;
 }
 
 
@@ -233,46 +218,84 @@ void intlist_remove_last_k(struct intlist * list, int k){
 
 	if ((list == NULL) ){ // check for invalid arguments
 		printf("Cant pop tail - list is NULL\n");
-		exit(-1);
-	}
+			exit(-1);
+		}
 
-	if ((k<0)){ // check for invalid arguments
-		return;
-	}
-
-	if ((k == 0 )){ // check for invalid arguments
-		return;
-	}
-
+		if ((k<=0)){ // check for invalid arguments
+			return;
+		}
 
 	int i, returnVal, size;
-	
 
 	returnVal = pthread_mutex_lock(&list->lock); // lock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));
-		exit(-1); 
-	}
-
-	size = intlist_size(list);
-	if (k <= size){
-		for (i=0; i<k; i++){
-			intlist_pop_tail(list);
+		if (returnVal != 0) {
+			printf("ERROR in pthread_mutex_lock(): %s\n", strerror(returnVal));
+			exit(-1); 
 		}
-	}
+	
+		size = intlist_size(list);
+		int isListNotEmpty = 1; // if 0 then list is empty, 1 otherwise
+		intlist_item * nodeToRemove;
+		intlist_item * current;
 
-	else{
-		for (i=0; i<size; i++){
-			intlist_pop_tail(list);
+		if (size == 0){
+			current = NULL;
+			isListNotEmpty = 0;
 		}
-	}
+		
+		
+		else{ // the size is bigger than 0
 
-	returnVal = pthread_mutex_unlock(&list->lock); // unlock
-	if (returnVal != 0) {
-		printf("ERROR in pthread_mutex_unlock(): %s\n", strerror(returnVal));
-		exit(-1); 
-	}
+			if (k < size){ // delete part of the list
+				current = list->head;
+				for (i=0; i < size - k - 1;i++){ // find last node (=new tail)
+						current = current->next;	
+				}
+				// fix pointers:
+				nodeToRemove = current->next;
+				list->size = size - k;
+				list->tail = current;
+				current->next = NULL;
+				
+			}
 
+
+			else { // remove all elements in list
+
+				nodeToRemove = list->head;
+				list->head = NULL;
+				list->tail = NULL;
+				list->size = 0;
+
+			}
+
+		}
+		
+
+		returnVal = pthread_mutex_unlock(&list->lock); // unlock
+		if (returnVal != 0) {
+			printf("ERROR in pthread_mutex_unlock(): %s\n", strerror(returnVal));
+			exit(-1); 
+		}
+
+		// free elements outside the lock is the size of the list is bigger than zero
+		if (isListNotEmpty == 1){
+			current = nodeToRemove;
+			intlist_item * nCurrent = current->next;
+			
+			for (i=0; i<k; i++){
+				
+				current->next = NULL;
+				current->prev = NULL;
+				free(current);
+				current = nCurrent; // the next node to delete in nCurrent
+				if (nCurrent == NULL)
+					break;
+				nCurrent = nCurrent->next;
+			}
+			
+		}
+		
 }
 
 void intlist_destroy(struct intlist * list){
@@ -387,7 +410,6 @@ void main(int argc, char *argv[]){
 		exit(-1);
 	}
 
-	//printf("Main starts...\n");
 	// init variables
 	char * ptr; // for strtol function
 	int returnVal; // return value to be check from various functions
